@@ -1,0 +1,50 @@
+// src/wallet/coincontrol.h
+class CCoinControl {
+    // ... existing code ...
++   bool m_include_unsafe_inputs = false;
+    // ... existing code ...
+};
+
+// src/wallet/coinselection.h
+struct CoinSelectionParams {
+    // ... existing code ...
++   bool m_include_unsafe_inputs = false;
+    // ... existing code ...
+};
+
+// src/wallet/spend.cpp
++   const bool only_safe = {coinControl ? !coinControl->m_include_unsafe_inputs : true};
+    // ... existing code ...
++   coin_selection_params.m_include_unsafe_inputs = coin_control.m_include_unsafe_inputs;
+    // ... existing code ...
++   if (coin_selection_params.m_include_unsafe_inputs) {
++       ordered_filters.push_back({CoinEligibilityFilter(/*conf_mine=*/0, /*conf_theirs*/0, max_ancestors-1, max_descendants-1, /*include_partial=*/true)});
++   }
+
+// src/wallet/rpc/spend.cpp
++   coin_control.m_include_unsafe_inputs = request.params[11].isNull() ? false : request.params[11].get_bool();
+    // ... existing code ...
++   {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false}, 
++    "Include inputs that are not safe to spend (unconfirmed transactions from outside keys and unconfirmed replacement transactions).\n"
++    "Warning: the resulting transaction may become invalid if one of the unsafe inputs disappears.\n"
++    "If that happens, you will need to fund the transaction with different inputs and republish it."}
+    // ... existing code ...
++   if (options.exists("include_unsafe")) {
++       coinControl.m_include_unsafe_inputs = options["include_unsafe"].get_bool();
++   }
+
+// src/wallet/rpc/coins.cpp
++   {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{true}, 
++    "Include outputs that are not safe to spend\n"}
+    // ... existing code ...
++   bool include_unsafe = true;
++   if (!request.params[3].isNull()) {
++       include_unsafe = request.params[3].get_bool();
++   }
++   cctl.m_include_unsafe_inputs = include_unsafe;
+
+// src/rpc/client.cpp
++   { "listunspent", 3, "include_unsafe" },
++   { "fundrawtransaction", 1, "include_unsafe"},
++   { "walletcreatefundedpsbt", 3, "include_unsafe"},
++   { "send", 4, "include_unsafe"},
