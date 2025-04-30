@@ -28,6 +28,7 @@ using common::FeeModesDetail;
 using common::InvalidEstimateModeErrorMessage;
 using common::StringForFeeReason;
 using common::TransactionErrorString;
+using common::TransactionError;
 using node::TransactionError;
 
 namespace wallet {
@@ -196,8 +197,6 @@ UniValue SendMoney(CWallet& wallet, const CCoinControl &coin_control, std::vecto
  * @param[in]     estimate_mode     UniValue string; fee estimation mode, valid values are "unset", "economical" or "conservative";
  * @param[in]     fee_rate          UniValue real; fee rate in sat/vB;
  *                                      if present, both conf_target and estimate_mode must either be null, or "unset"
- * @param[in]     override_min_fee  bool; whether to set fOverrideFeeRate to true to disable minimum fee rate checks and instead
- *                                      verify only that fee_rate is greater than 0
  * @throws a JSONRPCError if conf_target, estimate_mode, or fee_rate contain invalid values or are in conflict
  */
 static void SetFeeEstimateMode(const CWallet& wallet, CCoinControl& cc, const UniValue& conf_target, const UniValue& estimate_mode, const UniValue& fee_rate, bool override_min_fee)
@@ -239,7 +238,7 @@ RPCHelpMan sendtoaddress()
                                          "transaction, just kept in your wallet."},
                     {"subtractfeefromamount", RPCArg::Type::BOOL, RPCArg::Default{false}, "The fee will be deducted from the amount being sent.\n"
                                          "The recipient will receive less bitcoins than you enter in the amount field."},
-                    {"replaceable", RPCArg::Type::BOOL, RPCArg::DefaultHint{"wallet default"}, "Signal that this transaction can be replaced by a transaction (BIP 125)"},
+                    {"replaceable", RPCArg::Type::BOOL, RPCArg::DefaultHint{"wallet default"}, "Allow this transaction to be replaced by a transaction with higher fees via BIP 125"},
                     {"conf_target", RPCArg::Type::NUM, RPCArg::DefaultHint{"wallet -txconfirmtarget"}, "Confirmation target in blocks"},
                     {"estimate_mode", RPCArg::Type::STR, RPCArg::Default{"unset"}, "The fee estimate mode, must be one of (case insensitive):\n"
                       + FeeModesDetail(std::string("economical mode is used if the transaction is replaceable;\notherwise, conservative mode is used"))},
@@ -247,6 +246,10 @@ RPCHelpMan sendtoaddress()
                                          "dirty if they have previously been used in a transaction. If true, this also activates avoidpartialspends, grouping outputs by their addresses."},
                     {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::DefaultHint{"not set, fall back to wallet fee estimation"}, "Specify a fee rate in " + CURRENCY_ATOM + "/vB."},
                     {"verbose", RPCArg::Type::BOOL, RPCArg::Default{false}, "If true, return extra information about the transaction."},
+                    {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false},
+                     "Include inputs that are not safe to spend (unconfirmed transactions from outside keys and unconfirmed replacement transactions).\n"
+                     "Warning: the resulting transaction may become invalid if one of the unsafe inputs disappears.\n"
+                     "If that happens, you will need to fund the transaction with different inputs and republish it."}
                 },
                 {
                     RPCResult{"if verbose is not set or set to false",
@@ -299,6 +302,11 @@ RPCHelpMan sendtoaddress()
     coin_control.m_avoid_address_reuse = GetAvoidReuseFlag(*pwallet, request.params[8]);
     // We also enable partial spend avoidance if reuse avoidance is set.
     coin_control.m_avoid_partial_spends |= coin_control.m_avoid_address_reuse;
+    bool include_unsafe = false;
+    if (request.params.size() > 10 && !request.params[10].isNull()) {
+        include_unsafe = request.params[10].get_bool();
+    }
+    coin_control.m_include_unsafe_inputs = include_unsafe;
 
     SetFeeEstimateMode(*pwallet, coin_control, /*conf_target=*/request.params[6], /*estimate_mode=*/request.params[7], /*fee_rate=*/request.params[9], /*override_min_fee=*/false);
 
@@ -314,7 +322,7 @@ RPCHelpMan sendtoaddress()
     }
 
     std::vector<CRecipient> recipients{CreateRecipients(ParseOutputs(address_amounts), sffo_set)};
-    const bool verbose{request.params[10].isNull() ? false : request.params[10].get_bool()};
+    const bool verbose{request.params[11].isNull() ? false : request.params[11].get_bool()};
 
     return SendMoney(*pwallet, coin_control, recipients, mapValue, verbose);
 },
@@ -352,6 +360,10 @@ RPCHelpMan sendmany()
                       + FeeModesDetail(std::string("economical mode is used if the transaction is replaceable;\notherwise, conservative mode is used"))},
                     {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::DefaultHint{"not set, fall back to wallet fee estimation"}, "Specify a fee rate in " + CURRENCY_ATOM + "/vB."},
                     {"verbose", RPCArg::Type::BOOL, RPCArg::Default{false}, "If true, return extra information about the transaction."},
+                    {"include_unsafe", RPCArg::Type::BOOL, RPCArg::Default{false},
+                     "Include inputs that are not safe to spend (unconfirmed transactions from outside keys and unconfirmed replacement transactions).\n"
+                     "Warning: the resulting transaction may become invalid if one of the unsafe inputs disappears.\n"
+                     "If that happens, you will need to fund the transaction with different inputs and republish it."}
                 },
                 {
                     RPCResult{"if verbose is not set or set to false",
@@ -401,6 +413,11 @@ RPCHelpMan sendmany()
     if (!request.params[5].isNull()) {
         coin_control.m_signal_bip125_rbf = request.params[5].get_bool();
     }
+    bool include_unsafe = false;
+    if (request.params.size() > 9 && !request.params[9].isNull()) {
+        include_unsafe = request.params[9].get_bool();
+    }
+    coin_control.m_include_unsafe_inputs = include_unsafe;
 
     SetFeeEstimateMode(*pwallet, coin_control, /*conf_target=*/request.params[6], /*estimate_mode=*/request.params[7], /*fee_rate=*/request.params[8], /*override_min_fee=*/false);
 
@@ -408,7 +425,7 @@ RPCHelpMan sendmany()
             ParseOutputs(sendTo),
             InterpretSubtractFeeFromOutputInstructions(request.params[4], sendTo.getKeys())
     );
-    const bool verbose{request.params[9].isNull() ? false : request.params[9].get_bool()};
+    const bool verbose{request.params[10].isNull() ? false : request.params[10].get_bool()};
 
     return SendMoney(*pwallet, coin_control, recipients, std::move(mapValue), verbose);
 },
@@ -1084,7 +1101,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
             {
                 {"confTarget", UniValueType(UniValue::VNUM)},
                 {"conf_target", UniValueType(UniValue::VNUM)},
-                {"fee_rate", UniValueType()}, // will be checked by AmountFromValue() in SetFeeEstimateMode()
+                {"fee_rate",UniValueType()}, // will be checked by AmountFromValue() in SetFeeEstimateMode()
                 {"replaceable", UniValueType(UniValue::VBOOL)},
                 {"estimate_mode", UniValueType(UniValue::VSTR)},
                 {"outputs", UniValueType()}, // will be checked by AddOutputs()
@@ -1310,6 +1327,11 @@ RPCHelpMan send()
                 coin_control.m_max_tx_weight = options["max_tx_weight"].getInt<int>();
             }
             SetOptionsInputWeights(options["inputs"], options);
+            bool include_unsafe = false;
+            if (options.exists("include_unsafe")) {
+                include_unsafe = options["include_unsafe"].get_bool();
+            }
+            coin_control.m_include_unsafe_inputs = include_unsafe;
             // Clear tx.vout since it is not meant to be used now that we are passing outputs directly.
             // This sets us up for a future PR to completely remove tx from the function signature in favor of passing inputs directly
             rawTx.vout.clear();
@@ -1766,6 +1788,11 @@ RPCHelpMan walletcreatefundedpsbt()
     // be overridden by options.add_inputs.
     coin_control.m_allow_other_inputs = rawTx.vin.size() == 0;
     SetOptionsInputWeights(request.params[0], options);
+    bool include_unsafe = false;
+    if (options.exists("include_unsafe")) {
+        include_unsafe = options["include_unsafe"].get_bool();
+    }
+    coin_control.m_include_unsafe_inputs = include_unsafe;
     // Clear tx.vout since it is not meant to be used now that we are passing outputs directly.
     // This sets us up for a future PR to completely remove tx from the function signature in favor of passing inputs directly
     rawTx.vout.clear();

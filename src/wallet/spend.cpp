@@ -324,7 +324,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
     bool allow_used_addresses = !wallet.IsWalletFlagSet(WALLET_FLAG_AVOID_REUSE) || (coinControl && !coinControl->m_avoid_address_reuse);
     const int min_depth = {coinControl ? coinControl->m_min_depth : DEFAULT_MIN_DEPTH};
     const int max_depth = {coinControl ? coinControl->m_max_depth : DEFAULT_MAX_DEPTH};
-    const bool only_safe = {coinControl ? !coinControl->m_include_unsafe_inputs : true};
+    const bool only_safe = {coinControl ? (!coinControl->m_avoid_address_reuse && !coinControl->m_include_unsafe_inputs) : true};
     const bool can_grind_r = wallet.CanGrindR();
     std::vector<COutPoint> outpoints;
 
@@ -1192,7 +1192,7 @@ static util::Result<CreatedTransactionResult> CreateTransactionInternal(
     }
 
     // Shuffle selected coins and fill in final vin
-    std::vector<std::shared_ptr<COutput>> selected_coins = result.GetShuffledInputVector();
+std::vector<std::shared_ptr<COutput>> selected_coins = result.GetShuffledInputVector();
 
     if (coin_control.HasSelected() && coin_control.HasSelectedOrder()) {
         // When there are preselected inputs, we need to move them to be the first UTXOs
