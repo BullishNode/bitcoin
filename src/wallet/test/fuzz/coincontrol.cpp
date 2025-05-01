@@ -76,6 +76,10 @@ FUZZ_TARGET(coincontrol, .init = initialize_coincontrol)
                 (void)coin_control.SetInputWeight(out_point, weight);
             },
             [&] {
+                // Test toggling the include_unsafe_inputs flag
+                coin_control.m_include_unsafe_inputs = fuzzed_data_provider.ConsumeBool();
+            },
+            [&] {
                 (void)coin_control.GetInputWeight(out_point);
             });
     }

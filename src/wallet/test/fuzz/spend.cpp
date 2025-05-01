@@ -70,8 +70,38 @@ FUZZ_TARGET(wallet_create_transaction, .init = initialize_setup)
         tx.vout[0].scriptPubKey = GetScriptForDestination(fuzzed_wallet.GetDestination(fuzzed_data_provider));
         LOCK(fuzzed_wallet.wallet->cs_wallet);
         auto txid{tx.GetHash()};
-        auto ret{fuzzed_wallet.wallet->mapWallet.emplace(std::piecewise_construct, std::forward_as_tuple(txid), std::forward_as_tuple(MakeTransactionRef(std::move(tx)), TxStateConfirmed{chainstate.m_chain.Tip()->GetBlockHash(), chainstate.m_chain.Height(), /*index=*/0}))};
+        
+        // Randomly make some transactions unconfirmed with varying states
+        TxState tx_state;
+        if (fuzzed_data_provider.ConsumeBool()) {
+            // Create a confirmed transaction
+            tx_state = TxStateConfirmed{chainstate.m_chain.Tip()->GetBlockHash(), chainstate.m_chain.Height(), /*index=*/0};
+        } else {
+            // Create an unconfirmed transaction, potentially unsafe
+            tx_state = TxStateUnconfirmed{/*abandoned=*/fuzzed_data_provider.ConsumeBool()};
+        }
+        
+        auto ret{fuzzed_wallet.wallet->mapWallet.emplace(std::piecewise_construct, std::forward_as_tuple(txid), std::forward_as_tuple(MakeTransactionRef(std::move(tx)), tx_state))};
         assert(ret.second);
+    }
+    
+    // Test spending with varying include_unsafe_inputs flag settings
+    LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 100) {
+        CCoinControl coin_control;
+        coin_control.m_include_unsafe_inputs = fuzzed_data_provider.ConsumeBool();
+        
+        // Test various spending functions with the flag
+        try {
+            CAmount amount = ConsumeMoney(fuzzed_data_provider);
+            if (amount > 0) {
+                LOCK(fuzzed_wallet.wallet->cs_wallet);
+                auto dest = fuzzed_wallet.GetDestination(fuzzed_data_provider);
+                auto res = CreateTransaction(*fuzzed_wallet.wallet, {{dest, amount}}, {}, coin_control);
+                // We don't care if it succeeds, just that it doesn't crash or have unexpected behavior
+            }
+        } catch (const std::runtime_error&) {
+            // Expected in some cases
+        }
     }
 
     std::vector<CRecipient> recipients;
